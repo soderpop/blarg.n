@@ -1,0 +1,483 @@
+import time
+import hashlib
+import random
+import activitypub
+import libtorrent as lt
+import base64
+import rsa
+import ipfsapi
+
+# Connect to the IPFS network
+api = ipfsapi.Client("127.0.0.1", 5001)
+
+# Decentralized database to store the custom address of all users and their links
+db ={}
+
+# Structure to store the file information
+class Link:
+    def __init__(self, file_path, sender, recipients, expiration_time, link_hash, signature):
+        self.file_path = file_path
+        self.sender = sender
+        self.recipients = recipients
+        self.expiration_time = expiration_time
+        self.link_hash = link_hash
+        self.signature = signature
+
+# Function to send the link to X number of random users
+def send_link(link, X):
+    recipients = []
+    for i in range(X):
+        recipient = random.choice(list(db.keys()))
+        if recipient not in link.recipients:
+            recipients.append(recipient)
+            link.recipients.append(recipient)
+    for recipient in recipients:
+        # Send the link to the recipient
+        try:
+            link_data = (link.file_path + link.link_hash + str(link.expiration_time)).encode()
+            signature = RSA.sign(link_data, link.sender.private_key)
+            link_info = (link.file_path, link.link_hash, str(link.expiration_time), signature, link.sender.custom_address)
+            activitypub.send_message(recipient, link_info)
+        except activitypub.DeliveryError as e:
+            print(f"Failed to send the link to {recipient}: {e}")
+
+# Function to handle file like
+def handle_like(link, recipient):
+    # Option to reshare the link
+    reshare = input("Do you want to reshare the link? (yes/no)")
+    if reshare == "yes":
+        new_hash = hashlib.sha256(str(random.getrandbits(256)).encode()).hexdigest()
+        new_link = Link(link.file_path, link.sender, [], link.expiration_time, new_hash, link.signature)
+        send_link(new_link, X)
+
+# Main function to start the file sharing
+def start_file_sharing(file_path, X, expiration_time):
+    # Get the custom address of the sender
+    sender = activitypub.get_current_user()
+    db[sender.custom_address] = sender
+
+    link_hash = hashlib.sha256(str(random.getrandbits(256)).encode()).hexdigest()
+    link_data = (file_path + link_hash + str(expiration_time)).encode()
+    signature = RSA.sign(link_data, sender.private_key)
+    link = Link(file_path, sender, [], expiration_time, link_hash, signature)
+    send_link(link, X)
+    while True:
+        for recipient in link.recipients:
+            # Check if the link has expired or has already been used
+            if time.time() > link.expiration_time:
+                print(f"Link has expired. Can no longer be used.")
+        break
+    try:
+        message = activitypub.get_message(recipient)
+        if message:
+            # Verify the link authenticity using the sender's public key
+            file_path, link_hash, expiration_time, signature, sender_address = message
+            link_data = (file_path + link_hash + expiration_time).encode()
+            if RSA.verify(link_data, signature, sender.public_key) and sender_address == sender.custom_address:
+            # Handle file link
+                handle_like(link, recipient)
+    except activitypub.DeliveryError as e:
+        print(f"Failed to receive message from {recipient}: {e}")
+    except RSA.VerificationError as e:
+        print(f"Failed to verify the link: {e}")
+
+# Main function to start the file sharing
+def start_file_sharing(file_path, X, expiration_time):
+    # Get the custom address of the sender
+    sender = activitypub.get_current_user()
+    db[sender.custom_address] = sender
+
+    link_hash = hashlib.sha256(str(random.getrandbits(256)).encode()).hexdigest()
+    link_data = (file_path + link_hash + str(expiration_time)).encode()
+    signature = RSA.sign(link_data, sender.private_key)
+    link = Link(file_path, sender, [], expiration_time, link_hash, signature)
+    send_link(link, X)
+    while True:
+        for recipient in link.recipients:
+            # Check if the link has expired or has already been used
+            if time.time() > link.expiration_time:
+                print(f"Link has expired. Can no longer be used.")
+        break
+    try:
+        message = activitypub.get_message(recipient)
+        if message:
+            # Verify the link authenticity using the sender's public key
+            file_path, link_hash, expiration_time, signature, sender_address = message
+            link_data = (file_path + link_hash + expiration_time).encode()
+            if RSA.verify(link_data, signature, sender.public_key) and sender_address == sender.custom_address:
+            # Handle file link
+                handle_like(link, recipient)
+    except activitypub.DeliveryError as e:
+        print(f"Failed to receive message from {recipient}: {e}")
+    except RSA.VerificationError as e:
+        print(f"Failed to verify the link: {e}")
+
+#generate custom current user id
+def generate_custom_address():
+    #get current user id
+    current_user_id = activitypub.get_current_user().id
+    #generate random number
+    random_number = random.randint(1, 100)
+    #generate custom address
+    custom_address = current_user_id + str(random_number)
+    return custom_address
+
+#generate public and private key
+def generate_key():
+    #generate public and private key
+    (public_key, private_key) = rsa.newkeys(512)
+    return (public_key, private_key)
+
+#get public key
+def get_public_key(custom_address):
+    #get public key
+    public_key = db[custom_address].public_key
+    return public_key
+
+#get private key
+def get_private_key(custom_address):
+    #get private key
+    private_key = db[custom_address].private_key
+    return private_key
+
+#sign data
+def sign(data, private_key):
+    #sign data
+    signature = rsa.sign(data, private_key, 'SHA-256')
+    return signature
+
+#verify data
+def verify(data, signature, public_key):
+    #verify data
+    try:
+        rsa.verify(data, signature, public_key)
+    except rsa.VerificationError:
+        raise RSA.VerificationError("Failed to verify the data")
+
+#encrypt data
+def encrypt(data, public_key):
+    #encrypt data
+    encrypted_data = rsa.encrypt(data, public_key)
+    return encrypted_data
+
+#decrypt data
+def decrypt(encrypted_data, private_key):
+    #decrypt data
+    data = rsa.decrypt(encrypted_data, private_key)
+    return data
+
+#alter the value of X given the total ratio of likes to shares
+def alter_X(X, total_likes, total_shares):
+    #calculate the ratio of likes to shares
+    ratio = total_likes / total_shares
+    #alter the value of X
+    if ratio < 0.5:
+        X = X + 1
+    elif ratio > 0.5:
+        X = X - 1
+    return X
+
+#upload a file to a X users using libtorrent and ipfs
+def upload_file(file_path, X, expiration_time):
+    #get the custom address of the sender
+    sender = activitypub.get_current_user()
+    db[sender.custom_address] = sender
+    #get the file name
+    file_name = file_path.split("/")[-1]
+    #get the file size
+    file_size = os.path.getsize(file_path)
+    #get the file hash
+    file_hash = hashlib.sha256(str(random.getrandbits(256)).encode()).hexdigest()
+    #get the file signature
+    file_data = (file_path + file_hash + str(expiration_time)).encode()
+    file_signature = RSA.sign(file_data, sender.private_key)
+    #create a torrent file
+    torrent_file = lt.create_torrent(lt.file_storage(file_path))
+    #add the file hash and signature to the torrent file
+    torrent_file.set_hash(file_hash)
+    torrent_file.set_signature(file_signature)
+    #add the file name to the torrent file
+    torrent_file.set_name(file_name)
+    #add the file size to the torrent file
+    torrent_file.set_file_size(file_size)
+    #add the file path to the torrent file
+    torrent_file.set_file_path(file_path)
+    #add the expiration time to the torrent file
+    torrent_file.set_expiration_time(expiration_time)
+    #add the sender's custom address to the torrent file
+    torrent_file.set_sender_address(sender.custom_address)
+    #add the sender's public key to the torrent file
+    torrent_file.set_sender_public_key(sender.public_key)
+    
+    #add the torrent file to the ipfs network
+    torrent_file_path = "torrent_file.torrent"
+    torrent_file.generate(torrent_file_path)
+    torrent_file_hash = api.add(torrent_file_path)
+    #send the torrent file hash to X number of random users
+    recipients = []
+    for i in range(X):
+        recipient = random.choice(list(db.keys()))
+        if recipient not in recipients:
+            recipients.append(recipient)
+    for recipient in recipients:
+        #send the torrent file hash to the recipient
+        try:
+            activitypub.send_message(recipient, torrent_file_hash)
+        except activitypub.DeliveryError as e:
+            print(f"Failed to send the torrent file hash to {recipient}: {e}")
+    #wait for the torrent file to be downloaded
+    while True:
+        #check if the torrent file has been downloaded
+        if api.pin.ls()[torrent_file_hash]:
+            break
+    #get the torrent file
+    torrent_file = lt.torrent_info(torrent_file_path)
+    #get the file hash
+    file_hash = torrent_file.hash()
+    #get the file signature
+    file_signature = torrent_file.signature()
+    #get the file name
+    file_name = torrent_file.name()
+    #get the file size
+    file_size = torrent_file.file_size()
+    #get the file path
+    file_path = torrent_file.file_path()
+    #get the expiration time
+    expiration_time = torrent_file.expiration_time()
+    #get the sender's custom address
+    sender_address = torrent_file.sender_address()
+    #get the sender's public key
+    sender_public_key = torrent_file.sender_public_key()
+    #create a file object
+    file = File(file_path, file_hash, file_signature, file_name, file_size, expiration_time, sender_address, sender_public_key)
+    #send the file to X number of random users
+    send_file(file, X)
+    #wait for the file to be downloaded
+    while True:
+        #check if the file has been downloaded
+        if api.pin.ls()[file_hash]:
+            break
+    #get the file
+    file = File(file_path, file_hash, file_signature, file_name, file_size, expiration_time, sender_address, sender_public_key)
+    #handle the file
+    handle_file(file)
+
+#send a file to X number of random users
+def send_file(file, X):
+    #get the file hash
+    file_hash = file.hash
+    #get the file signature
+    file_signature = file.signature
+    #get the file name
+    file_name = file.name
+    #get the file size
+    file_size = file.size
+    #get the file path
+    file_path = file.path
+    #get the expiration time
+    expiration_time = file.expiration_time
+    #get the sender's custom address
+    sender_address = file.sender_address
+    #get the sender's public key
+    sender_public_key = file.sender_public_key
+    #get the recipients
+    recipients = []
+    for i in range(X):
+        recipient = random.choice(list(db.keys()))
+        if recipient not in recipients:
+            recipients.append(recipient)
+    for recipient in recipients:
+        #send the file to the recipient
+        try:
+            activitypub.send_message(recipient, (file_hash, file_signature, file_name, file_size, file_path, expiration_time, sender_address, sender_public_key))
+        except activitypub.DeliveryError as e:
+            print(f"Failed to send the file to {recipient}: {e}")
+
+#handle a file
+def handle_file(file):
+    #get the file hash
+    file_hash = file.hash
+    #get the file signature
+    file_signature = file.signature
+    #get the file name
+    file_name = file.name
+    #get the file size
+    file_size = file.size
+    #get the file path
+    file_path = file.path
+    #get the expiration time
+    expiration_time = file.expiration_time
+    #get the sender's custom address
+    sender_address = file.sender_address
+    #get the sender's public key
+    sender_public_key = file.sender_public_key
+    #get the sender's public key
+    sender_public_key = db[sender_address].public_key
+    #verify the file authenticity using the sender's public key
+    file_data = (file_path + file_hash + str(expiration_time)).encode()
+    if RSA.verify(file_data, file_signature, sender_public_key):
+        #option to download the file
+        download = input("Do you want to download the file? (yes/no)")
+        if download == "yes":
+            #download the file
+            api.get(file_hash)
+            #option to like the file
+            like = input("Do you want to like the file? (yes/no)")
+            if like == "yes":
+                #like the file
+                like_file(file)
+            #option to reshare the file
+            reshare = input("Do you want to reshare the file? (yes/no)")
+            if reshare == "yes":
+                #reshare the file
+                reshare_file(file)
+    else:
+        raise RSA.VerificationError("Failed to verify the file")
+
+#like a file
+def like_file(file):
+    #get the file hash
+    file_hash = file.hash
+    #get the file signature
+    file_signature = file.signature
+    #get the file name
+    file_name = file.name
+    #get the file size
+    file_size = file.size
+    #get the file path
+    file_path = file.path
+    #get the expiration time
+    expiration_time = file.expiration_time
+    #get the sender's custom address
+    sender_address = file.sender_address
+    #get the sender's public key
+    sender_public_key = file.sender_public_key
+    #get the sender's public key
+    sender_public_key = db[sender_address].public_key
+    #verify the file authenticity using the sender's public key
+    file_data = (file_path + file_hash + str(expiration_time)).encode()
+    if RSA.verify(file_data, file_signature, sender_public_key):
+        #get the sender's private key
+        sender_private_key = db[sender_address].private_key
+        #decrypt the file signature using the sender's private key
+        file_signature = RSA.decrypt(file_signature, sender_private_key)
+        #increment the number of likes
+        file_signature = file_signature + 1
+        #encrypt the file signature using the sender's public key
+        file_signature = RSA.encrypt(file_signature, sender_public_key)
+        #create a file object
+        file = File(file_path, file_hash, file_signature, file_name, file_size, expiration_time, sender_address, sender_public_key)
+        #send the file to X number of random users
+        send_file(file, X)
+    else:
+        raise RSA.VerificationError("Failed to verify the file")
+
+#reshare a file
+def reshare_file(file):
+    #get the file hash
+    file_hash = file.hash
+    #get the file signature
+    file_signature = file.signature
+    #get the file name
+    file_name = file.name
+    #get the file size
+    file_size = file.size
+    #get the file path
+    file_path = file.path
+    #get the expiration time
+    expiration_time = file.expiration_time
+    #get the sender's custom address
+    sender_address = file.sender_address
+    #get the sender's public key
+    sender_public_key = file.sender_public_key
+    #get the sender's public key
+    sender_public_key = db[sender_address].public_key
+    #verify the file authenticity using the sender's public key
+    file_data = (file_path + file_hash + str(expiration_time)).encode()
+    if RSA.verify(file_data, file_signature, sender_public_key):
+        #get the sender's private key
+        sender_private_key = db[sender_address].private_key
+        #decrypt the file signature using the sender's private key
+        file_signature = RSA.decrypt(file_signature, sender_private_key)
+        #increment the number of shares
+        file_signature = file_signature + 1
+        #encrypt the file signature using the sender's public key
+        file_signature = RSA.encrypt(file_signature, sender_public_key)
+        #create a file object
+        file = File(file_path, file_hash, file_signature, file_name, file_size, expiration_time, sender_address, sender_public_key)
+        #send the file to X number of random users
+        send_file(file, X)
+    else:
+        raise RSA.VerificationError("Failed to verify the file")
+
+#download a file
+def download_file(file_hash):
+    #download the file
+    api.get(file_hash)
+
+#get the file
+def get_file(file_hash):
+    #get the file
+    file = api.get(file_hash)
+    return file
+
+#get the file hash
+def get_file_hash(file):
+    #get the file hash
+    file_hash = file.hash
+    return file_hash
+
+#get the file signature
+def get_file_signature(file):
+    #get the file signature
+    file_signature = file.signature
+    return file_signature
+
+#get the file name
+def get_file_name(file):
+    #get the file name
+    file_name = file.name
+    return file_name
+
+#get the file size
+def get_file_size(file):
+    #get the file size
+    file_size = file.size
+    return file_size
+
+#get the file path
+def get_file_path(file):
+    #get the file path
+    file_path = file.path
+    return file_path
+
+#get the expiration time
+def get_expiration_time(file):
+    #get the expiration time
+    expiration_time = file.expiration_time
+    return expiration_time
+
+#get the sender's custom address
+def get_sender_address(file):
+    #get the sender's custom address
+    sender_address = file.sender_address
+    return sender_address
+
+#get the sender's public key
+def get_sender_public_key(file):
+    #get the sender's public key
+    sender_public_key = file.sender_public_key
+    return sender_public_key
+
+def main():
+    #get the file path
+    file_path = input("Enter the file path: ")
+    #get the value of X
+    X = 4
+    #get the expiration time
+    expiration_time = int(input("Enter the expiration time: "))
+    #start the file sharing
+    start_file_sharing(file_path, X, expiration_time)
+
+if __name__ == "__main__":
+    main()
